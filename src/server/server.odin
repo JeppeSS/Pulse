@@ -2,7 +2,7 @@ package server
 
 import "core:net"
 import "core:fmt"
-import "core:mem"
+import "core:strings"
 
 import p "protocol"
 
@@ -48,7 +48,6 @@ server_run :: proc( p_server: ^Server )
     for
     {
         bytes_read, remote_endpoint, err := net.recv_udp( p_server.socket, buffer[:] )
-        
         header, success := parse_message_header( buffer[:] )
         if !success
         {
@@ -64,7 +63,8 @@ server_run :: proc( p_server: ^Server )
 
         topic_start := header_size
         topic_end := topic_start + int( header.topic_len )
-        topic := string(buffer[ topic_start : topic_end ])
+        topic := strings.clone( string( buffer[ topic_start : topic_end ] ) )
+        defer delete( topic )
 
         payload_start: u16 = u16( topic_end )
         payload_end := payload_start + header.payload_len
@@ -131,11 +131,17 @@ handle_subscribe :: proc( p_server: ^Server, topic: string, client: net.Endpoint
 }
 
 @(private)
-handle_publish :: proc( p_server: ^Server, topic: string, payload: []u8 )
+handle_publish :: proc( p_server: ^Server, publish_topic: string, payload: []u8 )
 {
-    subscribers, ok := p_server.topic_map[ topic ]
-    if ok
+
+    total_sent := 0
+    for subscribe_topic, subscribers in p_server.topic_map
     {
+        if !topic_matches( subscribe_topic, publish_topic )
+        {
+            continue
+        }
+
         for subscriber in subscribers
         {
             _, err := net.send_udp( p_server.socket, payload[:], subscriber )
@@ -146,8 +152,7 @@ handle_publish :: proc( p_server: ^Server, topic: string, payload: []u8 )
         }
     }
 
-
-    fmt.printfln("Published to %d subs on topic '%s'", len( subscribers ), topic )
+    fmt.printfln("Published to %d subs matching topic '%s'", total_sent, publish_topic)
 }
 
 @(private)
@@ -197,4 +202,41 @@ parse_message_header :: proc( buffer: []u8 ) -> ( header: p.Message_Header, succ
         topic_len    = topic_len,
         payload_len  = payload_len,
     }, true;
+}
+
+@(private)
+topic_matches :: proc( sub: string, pub: string ) -> bool
+{
+    sub_parts := strings.split( sub, "/" )
+    defer delete( sub_parts )
+    
+    pub_parts := strings.split( pub, "/" )
+    defer delete( pub_parts )
+
+    for i in 0..<len( sub_parts )
+    {
+        if i >= len( pub_parts )
+        {
+            return false
+        }
+
+
+        if sub_parts[ i ] == "#"
+        {
+            return true
+        }
+        else if sub_parts[ i ] == "+"
+        {
+            continue
+        }
+        else
+        {
+            if sub_parts[ i ] != pub_parts[ i ]
+            {
+                return false
+            }
+        }
+    }
+
+    return len( sub_parts ) == len( pub_parts )
 }
