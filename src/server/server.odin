@@ -149,6 +149,10 @@ handle_publish :: proc( p_server: ^Server, publish_topic: string, payload: []u8 
             {
                 fmt.eprintfln("Failed to send to %v: %v", subscriber, err)
             }
+            else
+            {
+                total_sent += 1
+            }
         }
     }
 
