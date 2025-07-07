@@ -49,17 +49,12 @@ server_run :: proc( p_server: ^Server )
     {
         bytes_read, remote_endpoint, err := net.recv_udp( p_server.socket, buffer[:] )
         
-        msg_type     := buffer[0];
-        topic_len    := buffer[1];
-        payload_len  := (u16(buffer[2]) << 8) | u16(buffer[3]);
-
-        header := p.Message_Header{
-            message_type     = p.Message_Type(msg_type),
-            topic_len    = topic_len,
-            payload_len  = payload_len,
-        };
-
-
+        header, success := parse_message_header( buffer[:] )
+        if !success
+        {
+            fmt.eprintfln("Error: malformed message header (bytes_read = %d)", bytes_read)
+            continue
+        }
         total_needed := header_size + int( header.topic_len ) + int( header.payload_len )
         if bytes_read < total_needed
         {
@@ -182,4 +177,24 @@ handle_unsubscribe :: proc( p_server: ^Server, topic: string, client: net.Endpoi
         delete( p_server.topic_map[ topic ] )
         fmt.printfln("Topic '%s' now has no subscribers; removed", topic)
     }
+}
+
+
+@(private)
+parse_message_header :: proc( buffer: []u8 ) -> ( header: p.Message_Header, success: bool )
+{
+    if len( buffer) <= 0
+    {
+        return p.Message_Header{}, false
+    }
+
+    msg_type     := buffer[0];
+    topic_len    := buffer[1];
+    payload_len  := (u16(buffer[2]) << 8) | u16(buffer[3]);
+
+    return p.Message_Header{
+        message_type     = p.Message_Type(msg_type),
+        topic_len    = topic_len,
+        payload_len  = payload_len,
+    }, true;
 }
