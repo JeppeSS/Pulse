@@ -71,7 +71,7 @@ server_run :: proc( p_server: ^Server )
         topic_end := topic_start + int( header.topic_len )
         topic := string(buffer[ topic_start : topic_end ])
 
-        payload_start: u16 = u16( topic_end ) + 1
+        payload_start: u16 = u16( topic_end )
         payload_end := payload_start + header.payload_len
         payload := buffer[ payload_start : payload_end ]
 
@@ -82,6 +82,10 @@ server_run :: proc( p_server: ^Server )
         else if header.message_type == .Publish
         {
             handle_publish( p_server, topic, payload )
+        }
+        else if header.message_type == .Unsubscribe
+        {
+            handle_unsubscribe( p_server, topic, remote_endpoint )
         }
     }
 }
@@ -149,4 +153,33 @@ handle_publish :: proc( p_server: ^Server, topic: string, payload: []u8 )
 
 
     fmt.printfln("Published to %d subs on topic '%s'", len( subscribers ), topic )
+}
+
+@(private)
+handle_unsubscribe :: proc( p_server: ^Server, topic: string, client: net.Endpoint )
+{
+    subscribers, ok := p_server.topic_map[ topic ]
+    if !ok
+    {
+        return
+    }
+
+    idx := 0
+    for subscriber in subscribers
+    {
+        if subscriber.address == client.address && subscriber.port == client.port
+        {
+            unordered_remove( &p_server.topic_map[ topic ], idx )
+            fmt.printfln( "Unsubscribed %v from topic '%s'", client, topic )
+            break
+        }
+
+        idx += 1
+    }
+
+    if len( p_server.topic_map[ topic ] ) == 0 
+    {
+        delete( p_server.topic_map[ topic ] )
+        fmt.printfln("Topic '%s' now has no subscribers; removed", topic)
+    }
 }
