@@ -20,9 +20,15 @@ Touch_Message :: struct
     endpoint: net.Endpoint
 }
 
+Tick_Message :: struct
+{
+
+}
+
 Connection_Message :: union
 {
     Connect_Message,
     Disconnect_Message,
-    Touch_Message
+    Touch_Message,
+    Tick_Message
 }

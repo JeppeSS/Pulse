@@ -13,17 +13,17 @@ Unsubscribe :: struct
     topic: string,
 }
 
+Unsubscribe_All :: struct
+{
+
+}
+
 Publish :: struct
 {
     topic:   string,
     payload: [dynamic]u8
 }
 
-
-Shutdown :: struct
-{
-
-}
 
 Message_Type :: enum u8
 {
@@ -37,8 +37,8 @@ Message_Data :: union
 {
     Subscribe,
     Unsubscribe,
+    Unsubscribe_All,
     Publish,
-    Shutdown
 }
 
 Message :: struct

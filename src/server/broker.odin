@@ -24,6 +24,7 @@ Broker :: struct
     using actor: a.Actor( Message ),
     socket: net.UDP_Socket,
     topic_map: map[string]Topic_Info,
+    subscriptions: map[string][dynamic]string,
     p_manager: ^Connection_Manager
 }
 
@@ -34,6 +35,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
     q.queue_init( Message, &p_broker.inbox )
 
     p_broker.topic_map = make( map[string]Topic_Info )
+    p_broker.subscriptions = make( map[string][dynamic]string )
 
     // TODO[Jeppe]: Move to config
     socket, err := net.make_bound_udp_socket( net.IP4_Loopback, 3030 )
@@ -108,9 +110,8 @@ broker_poll :: proc( p_broker: ^Broker )
             return
         }
 
-        q.enqueue( Connection_Message, &p_broker.p_manager.actor.inbox, Connect_Message {
-            endpoint = remote_endpoint,
-            timestamp = time.now()
+        q.enqueue(Connection_Message, &p_broker.p_manager.actor.inbox, Touch_Message {
+            endpoint = remote_endpoint
         })
 
         message, ok := decode_incoming_message( buffer[:], remote_endpoint )
@@ -129,6 +130,7 @@ broker_handle_message :: proc( p_broker: ^Broker, message: Message )
         case Subscribe: handle_subscribe( p_broker, message.from, message.data.(Subscribe) )
         case Unsubscribe: handle_unsubscribe( p_broker, message.from, message.data.(Unsubscribe) )
         case Publish: handle_publish( p_broker, message.from, message.data.(Publish) )
+        case Unsubscribe_All: handle_unsubscribe_all( p_broker, message.from, message.data.(Unsubscribe_All) )
     }
 }
 
@@ -246,6 +248,14 @@ handle_subscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Subscr
     
     p_broker.topic_map[message.topic] = topic_info
 
+    key := net.endpoint_to_string( from )
+    topics, exists := p_broker.subscriptions[ key ] 
+    if !exists {
+        topics = make( [dynamic]string, 0, 4 )
+    }
+    append( &topics, strings.clone( message.topic ) )
+    p_broker.subscriptions[ key ] = topics
+
     fmt.printfln("Client %v subscribed to '%s'", from, message.topic)
     fmt.printfln("Topic '%s' now has %d subscriber(s)", message.topic, len(topic_info.subscribers))
 
@@ -310,12 +320,43 @@ handle_unsubscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsu
             }
             delete_key( &p_broker.topic_map, message.topic )
             fmt.printfln("No more subscribers; removed topic '%s'", message.topic)
-            return
+        }
+        else
+        {
+            p_broker.topic_map[message.topic] = topic_info
         }
     }
+    else
+    {
+        p_broker.topic_map[message.topic] = topic_info
+    }
 
-    p_broker.topic_map[message.topic] = topic_info
 
+
+    key := net.endpoint_to_string( from )
+    topics, exists := p_broker.subscriptions[ key ]
+    if exists
+    {
+        idx := 0
+        for t in topics
+        {
+            if t == message.topic 
+            {
+                unordered_remove( &topics, idx )
+                break
+            }
+            idx += 1
+        }
+
+        if len( topics ) == 0
+        {
+            delete_key(&p_broker.subscriptions, key)
+        }
+        else
+        {
+            p_broker.subscriptions[key] = topics
+        }
+    }
 }
 
 @(private)
@@ -361,4 +402,23 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
 
 
     fmt.printfln( "Published to %d subs matching topic '%s'", total_sent, message.topic )
+}
+
+@(private)
+handle_unsubscribe_all :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsubscribe_All )
+{
+     for topic, info in p_broker.topic_map
+     {
+        for sub in info.subscribers 
+        {
+            if sub.address == from.address && sub.port == from.port 
+            {
+                q.enqueue(Message, &p_broker.inbox, Message{
+                    from = from,
+                    data = Unsubscribe{ topic = topic }
+                })
+                break
+            }
+        }
+    }
 }
