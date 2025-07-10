@@ -5,6 +5,11 @@ import "core:net"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:time"
+
+
+import q "queue"
+import a "actor"
 
 
 Topic_Info :: struct
@@ -16,16 +21,17 @@ Topic_Info :: struct
 
 Broker :: struct
 {
-    using actor: Actor,
+    using actor: a.Actor( Message ),
     socket: net.UDP_Socket,
     topic_map: map[string]Topic_Info,
+    p_manager: ^Connection_Manager
 }
 
 
-broker_create :: proc() -> ^Broker
+broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
 {
     p_broker := new( Broker )
-    message_queue_init( &p_broker.inbox )
+    q.queue_init( Message, &p_broker.inbox )
 
     p_broker.topic_map = make( map[string]Topic_Info )
 
@@ -34,7 +40,7 @@ broker_create :: proc() -> ^Broker
     if err != nil
     {
         fmt.eprintfln( "Failed to create socket: %v", err )
-        message_queue_destroy( &p_broker.inbox )
+        q.queue_destroy( Message, &p_broker.inbox )
         free( p_broker )
         return nil
     }
@@ -44,16 +50,48 @@ broker_create :: proc() -> ^Broker
     {
         fmt.eprintfln( "Failed to set non-blocking: %v", err_block )
         net.close(socket)
-        message_queue_destroy( &p_broker.inbox )
+        q.queue_destroy( Message, &p_broker.inbox )
         free( p_broker )
         return nil
     }
 
     p_broker.socket = socket
+    p_broker.p_manager = p_manager
 
     return p_broker
 }
 
+
+
+broker_run :: proc( p_broker: ^Broker )
+{
+    broker_poll( p_broker )
+    a.actor_run( Message, p_broker, broker_handle_message )
+}
+
+
+broker_destroy :: proc( p_broker: ^Broker )
+{
+    net.close( p_broker.socket )
+    q.queue_destroy( Message, &p_broker.inbox )
+    
+    for sub_topic, sub_info in p_broker.topic_map
+    {
+        if sub_info.subscribers != nil
+        {
+            delete( sub_info.subscribers )
+        }
+        if sub_info.retained != nil
+        {
+            delete( sub_info.retained )
+        } 
+    }
+
+    free( p_broker )
+}
+
+
+@(private)
 broker_poll :: proc( p_broker: ^Broker )
 {
     buffer: [4096]u8
@@ -70,20 +108,20 @@ broker_poll :: proc( p_broker: ^Broker )
             return
         }
 
+        q.enqueue( Connection_Message, &p_broker.p_manager.actor.inbox, Connect_Message {
+            endpoint = remote_endpoint,
+            timestamp = time.now()
+        })
+
         message, ok := decode_incoming_message( buffer[:], remote_endpoint )
         if ok
         {
-            enqueue( &p_broker.inbox, message )
+            q.enqueue( Message, &p_broker.inbox, message )
         }
     }
 }
 
-broker_run :: proc( p_broker: ^Broker )
-{
-    broker_poll( p_broker )
-    actor_run( p_broker, broker_handle_message )
-}
-
+@(private)
 broker_handle_message :: proc( p_broker: ^Broker, message: Message )
 {
     #partial switch _ in message.data
@@ -92,26 +130,6 @@ broker_handle_message :: proc( p_broker: ^Broker, message: Message )
         case Unsubscribe: handle_unsubscribe( p_broker, message.from, message.data.(Unsubscribe) )
         case Publish: handle_publish( p_broker, message.from, message.data.(Publish) )
     }
-}
-
-broker_destroy :: proc( p_broker: ^Broker )
-{
-    net.close( p_broker.socket )
-    message_queue_destroy( &p_broker.inbox )
-    
-    for sub_topic, sub_info in p_broker.topic_map
-    {
-        if sub_info.subscribers != nil
-        {
-            delete( sub_info.subscribers )
-        }
-        if sub_info.retained != nil
-        {
-            delete( sub_info.retained )
-        } 
-    }
-
-    free( p_broker )
 }
 
 
