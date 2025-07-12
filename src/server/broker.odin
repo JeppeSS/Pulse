@@ -8,6 +8,7 @@ import "core:time"
 import "core:log"
 
 
+import c "config"
 import q "queue"
 import a "actor"
 
@@ -23,13 +24,14 @@ Broker :: struct
 {
     using actor: a.Actor( Message ),
     socket: net.UDP_Socket,
+    config: c.Pulse_Config,
     topic_map: map[string]Topic_Info,
     subscriptions: map[string][dynamic]string,
     p_manager: ^Connection_Manager
 }
 
 
-broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
+broker_create :: proc( p_manager: ^Connection_Manager, config: c.Pulse_Config ) -> ^Broker
 {
     p_broker := new( Broker )
     q.queue_init( Message, &p_broker.inbox )
@@ -38,7 +40,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
     p_broker.subscriptions = make( map[string][dynamic]string )
 
     // TODO[Jeppe]: Move to config
-    socket, err := net.make_bound_udp_socket( net.IP4_Any, 3030 )
+    socket, err := net.make_bound_udp_socket( net.IP4_Any, config.port )
     if err != nil
     {
         log.errorf( "Failed to create socket: %v", err )
@@ -59,6 +61,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
 
     p_broker.socket = socket
     p_broker.p_manager = p_manager
+    p_broker.config = config
 
     return p_broker
 }

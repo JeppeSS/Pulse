@@ -4,6 +4,7 @@ import "core:net"
 import "core:time"
 import "core:log"
 
+import c "config"
 import a "actor"
 import q "queue"
 
@@ -17,16 +18,18 @@ Connection_Manager :: struct
 {
     using actor: a.Actor( Connection_Message ),
     connections: map[string]Connection,
+    config: c.Pulse_Config,
     p_broker: ^Broker
 }
 
 
-connection_manager_create :: proc( ) -> ^Connection_Manager
+connection_manager_create :: proc( config: c.Pulse_Config ) -> ^Connection_Manager
 {
     p_manager := new( Connection_Manager )
     q.queue_init( Connection_Message, &p_manager.inbox )
 
     p_manager.connections = make( map[string]Connection )
+    p_manager.config = config
     
     return p_manager
 }
@@ -105,7 +108,7 @@ handle_touch_message :: proc( p_manager: ^Connection_Manager, message: Touch_Mes
 handle_tick_message :: proc( p_manager: ^Connection_Manager, message: Tick_Message )
 {
     now := time.now()
-    timeout := time.Second * 30
+    timeout := p_manager.config.connection_timeout
     for key, connection in p_manager.connections
     {
         delta := time.diff( connection.last_seen, now )

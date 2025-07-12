@@ -5,16 +5,20 @@ import "core:log"
 
 import s "server"
 import q "server/queue"
+import c "server/config"
 
 main :: proc()
 {
     log_options := log.Options{ .Level } | log.Full_Timestamp_Opts
     context.logger = log.create_console_logger ( opt = log_options )
 
-    p_connection_manager := s.connection_manager_create()
+    config := c.parse_config_from_args()
+
+
+    p_connection_manager := s.connection_manager_create( config )
     defer s.connection_manager_destroy( p_connection_manager )
 
-    p_broker := s.broker_create( p_connection_manager )
+    p_broker := s.broker_create( p_connection_manager, config )
     defer s.broker_destroy( p_broker )
 
 
@@ -25,7 +29,7 @@ main :: proc()
     ticker: time.Stopwatch
     time.stopwatch_start( &ticker )
 
-    ticker_interval := time.Second * 5
+    ticker_interval := config.tick_interval
 
     log.info( "Starting Pulse Server..." )
     for
