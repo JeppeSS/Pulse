@@ -1,13 +1,16 @@
 package main
 
-import "core:fmt"
 import "core:time"
+import "core:log"
 
 import s "server"
 import q "server/queue"
 
 main :: proc()
 {
+    log_options := log.Options{ .Level } | log.Full_Timestamp_Opts
+    context.logger = log.create_console_logger ( opt = log_options )
+
     p_connection_manager := s.connection_manager_create()
     defer s.connection_manager_destroy( p_connection_manager )
 
@@ -24,7 +27,7 @@ main :: proc()
 
     ticker_interval := time.Second * 5
 
-    fmt.printfln("Starting Pulse Server...")
+    log.info( "Starting Pulse Server..." )
     for
     {
         if time.stopwatch_duration( ticker ) > ticker_interval

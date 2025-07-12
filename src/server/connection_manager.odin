@@ -1,8 +1,8 @@
 package server
 
-import "core:fmt"
 import "core:net"
 import "core:time"
+import "core:log"
 
 import a "actor"
 import q "queue"
@@ -66,7 +66,7 @@ handle_connect_message :: proc( p_manager: ^Connection_Manager, message: Connect
     {
         connection.last_seen = message.timestamp
         p_manager.connections[ key ] = connection
-        fmt.printfln( "Updated connection for %s", key )
+        log.infof( "Updated connection for %s", key )
     }
     else
     {
@@ -74,7 +74,7 @@ handle_connect_message :: proc( p_manager: ^Connection_Manager, message: Connect
             endpoint = message.endpoint,
             last_seen = message.timestamp
         }
-        fmt.printfln( "New connection: %s", key )
+        log.infof( "New connection: %s", key )
     }
 }
 
@@ -89,7 +89,7 @@ handle_touch_message :: proc( p_manager: ^Connection_Manager, message: Touch_Mes
     {
         connection.last_seen = now
         p_manager.connections[key] = connection
-        fmt.printfln( "Touched connection for %s", key )
+        log.infof( "Touched connection for %s", key )
     } 
     else
     {
@@ -97,7 +97,7 @@ handle_touch_message :: proc( p_manager: ^Connection_Manager, message: Touch_Mes
             endpoint = message.endpoint,
             last_seen = now,
         }
-        fmt.printfln( "Touch created new connection: %s", key )
+        log.infof( "Touch created new connection: %s", key )
     }
 }
 
@@ -111,7 +111,7 @@ handle_tick_message :: proc( p_manager: ^Connection_Manager, message: Tick_Messa
         delta := time.diff( connection.last_seen, now )
         if delta > timeout
         {
-            fmt.printfln( "Connection timed out: %s", key )
+            log.infof( "Connection timed out: %s", key )
             delete_key( &p_manager.connections, key )
             q.enqueue( Connection_Message, &p_manager.actor.inbox, Disconnect_Message {
                 endpoint = connection.endpoint
@@ -123,7 +123,7 @@ handle_tick_message :: proc( p_manager: ^Connection_Manager, message: Tick_Messa
 @(private)
 handle_disconnect_message :: proc( p_manager: ^Connection_Manager, message: Disconnect_Message )
 {
-    fmt.printfln("Disconnected: %v", message.endpoint)
+    log.infof("Disconnected: %v", message.endpoint)
     q.enqueue( Message, &p_manager.p_broker.actor.inbox, Message {
         from = message.endpoint,
         data = Unsubscribe_All{ }

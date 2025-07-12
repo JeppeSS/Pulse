@@ -2,10 +2,10 @@ package server
 
 import "core:mem"
 import "core:net"
-import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:time"
+import "core:log"
 
 
 import q "queue"
@@ -41,7 +41,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
     socket, err := net.make_bound_udp_socket( net.IP4_Any, 3030 )
     if err != nil
     {
-        fmt.eprintfln( "Failed to create socket: %v", err )
+        log.errorf( "Failed to create socket: %v", err )
         q.queue_destroy( Message, &p_broker.inbox )
         free( p_broker )
         return nil
@@ -50,7 +50,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
     err_block := net.set_blocking( socket, false )
     if err_block != .None
     {
-        fmt.eprintfln( "Failed to set non-blocking: %v", err_block )
+        log.errorf( "Failed to set non-blocking: %v", err_block )
         net.close(socket)
         q.queue_destroy( Message, &p_broker.inbox )
         free( p_broker )
@@ -106,7 +106,7 @@ broker_poll :: proc( p_broker: ^Broker )
             {
                 return
             }
-            fmt.eprintfln( "recv_udp error: %v", err )
+            log.errorf( "recv_udp error: %v", err )
             return
         }
 
@@ -114,7 +114,7 @@ broker_poll :: proc( p_broker: ^Broker )
             endpoint = remote_endpoint
         })
 
-        fmt.printfln( "Received UDP from %v, %d bytes", remote_endpoint, bytes_read )
+        log.infof( "Received UDP from %v, %d bytes", remote_endpoint, bytes_read )
         message, ok := decode_incoming_message( buffer[:], remote_endpoint )
         if ok
         {
@@ -129,19 +129,19 @@ broker_handle_message :: proc( p_broker: ^Broker, message: Message )
     switch _ in message.data
     {
         case Subscribe: 
-            fmt.printfln( "Handling Subscribe from %v", message.from )
+            log.infof( "Handling Subscribe from %v", message.from )
             handle_subscribe( p_broker, message.from, message.data.(Subscribe) )
         case Unsubscribe: 
-            fmt.printfln( "Handling Unsubscribe from %v", message.from )
+            log.infof( "Handling Unsubscribe from %v", message.from )
             handle_unsubscribe( p_broker, message.from, message.data.(Unsubscribe) )
         case Publish:
-            fmt.printfln( "Handling Publish from %v", message.from )
+            log.infof( "Handling Publish from %v", message.from )
             handle_publish( p_broker, message.from, message.data.(Publish) )
         case Unsubscribe_All:
-            fmt.printfln( "Handling Unsubscribe_All from %v", message.from )
+            log.infof( "Handling Unsubscribe_All from %v", message.from )
             handle_unsubscribe_all( p_broker, message.from, message.data.(Unsubscribe_All) )
         case Ping: 
-            fmt.printfln( "Handling Ping from %v", message.from )
+            log.infof( "Handling Ping from %v", message.from )
             handle_ping( p_broker, message.from )
     }
 }
@@ -188,11 +188,11 @@ decode_incoming_message :: proc( buffer: []u8, from: net.Endpoint ) -> ( message
         case .Ping:
             message_data = Ping{}
         case:
-            fmt.eprintfln( "Unknown message_type: %d from %v", message_type, from )
+            log.warnf( "Unknown message_type: %d from %v", message_type, from )
             return Message{}, false
     }
 
-    fmt.printfln( "Decoded %v message from %v", message_type, from )
+    log.infof( "Decoded %v message from %v", message_type, from )
     return Message{ from = from, data = message_data }, true
 }
 
@@ -272,8 +272,8 @@ handle_subscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Subscr
     append( &topics, strings.clone( message.topic ) )
     p_broker.subscriptions[ key ] = topics
 
-    fmt.printfln("Client %v subscribed to '%s'", from, message.topic)
-    fmt.printfln("Topic '%s' now has %d subscriber(s)", message.topic, len(topic_info.subscribers))
+    log.infof( "Client %v subscribed to '%s'", from, message.topic )
+    log.infof( "Topic '%s' now has %d subscriber(s)", message.topic, len( topic_info.subscribers ) )
 
 
    for topic_key, info in p_broker.topic_map
@@ -283,11 +283,11 @@ handle_subscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Subscr
             _, err := net.send_udp( p_broker.socket, info.retained[:], from )
             if err != nil 
             {
-                fmt.eprintfln("Failed to send retained to %v on topic '%s': %v", from, topic_key, err)
+                log.errorf( "Failed to send retained to %v on topic '%s': %v", from, topic_key, err )
             } 
             else 
             {
-                fmt.printfln("Sent retained to %v on topic '%s'", from, topic_key)
+                log.infof( "Sent retained to %v on topic '%s'", from, topic_key )
             }
         }
     }
@@ -320,7 +320,7 @@ handle_unsubscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsu
     if found
     {
         unordered_remove( &topic_info.subscribers, idx )
-        fmt.printfln("Client %v unsubscribed from '%s'", from, message.topic )
+        log.infof( "Client %v unsubscribed from '%s'", from, message.topic )
     }
 
 
@@ -335,7 +335,7 @@ handle_unsubscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsu
                 delete( topic_info.retained )
             }
             delete_key( &p_broker.topic_map, message.topic )
-            fmt.printfln("No more subscribers; removed topic '%s'", message.topic)
+            log.infof( "No more subscribers; removed topic '%s'", message.topic )
         }
         else
         {
@@ -407,7 +407,7 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
             _, err := net.send_udp( p_broker.socket, message.payload[:], sub )
             if err != nil 
             {
-                fmt.eprintfln( "Failed to send to %v: %v", sub, err )
+                log.errorf( "Failed to send to %v: %v", sub, err )
             } 
             else 
             {
@@ -417,7 +417,7 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
     }
 
 
-    fmt.printfln( "Published to %d subs matching topic '%s'", total_sent, message.topic )
+    log.infof( "Published to %d subs matching topic '%s'", total_sent, message.topic )
 }
 
 @(private)
@@ -446,5 +446,5 @@ handle_ping :: proc( p_broker: ^Broker, from: net.Endpoint )
         endpoint = from
     })
 
-    fmt.printfln("Received ping from %v", from)
+    log.infof( "Received ping from %v", from )
 }
