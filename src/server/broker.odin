@@ -40,7 +40,7 @@ broker_create :: proc( p_manager: ^Connection_Manager, config: c.Pulse_Config ) 
     p_broker.subscriptions = make( map[string][dynamic]string )
 
     // TODO[Jeppe]: Move to config
-    socket, err := net.make_bound_udp_socket( net.IP4_Any, config.port )
+    socket, err := net.make_bound_udp_socket( config.ip, config.port )
     if err != nil
     {
         log.errorf( "Failed to create socket: %v", err )

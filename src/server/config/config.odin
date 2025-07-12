@@ -4,8 +4,10 @@ import "core:time"
 import "core:os"
 import "core:strings"
 import "core:strconv"
+import "core:net"
 
 Pulse_Config :: struct {
+    ip: net.Address,
     port: int,
     connection_timeout: time.Duration,
     tick_interval: time.Duration,
@@ -16,14 +18,22 @@ parse_config_from_args :: proc() -> Pulse_Config
 {
 
     config := Pulse_Config{
-        port = 3030,
+        ip                 = net.IP4_Any,
+        port               = 3030,
         connection_timeout = time.Second * 30,
-        tick_interval = time.Second * 5,
+        tick_interval      = time.Second * 5,
     }
 
     for i := 0; i < len( os.args ); i += 1
     {
         arg := os.args[ i ]
+
+        if strings.has_prefix( arg, "-ip" ) && i+1 < len( os.args ) 
+        {
+            ip := os.args[ i+1 ]
+            config.ip = net.parse_address( ip )
+            i += 1
+        }
 
         if strings.has_prefix( arg, "-port" ) && i+1 < len( os.args )
         {
@@ -45,6 +55,11 @@ parse_config_from_args :: proc() -> Pulse_Config
             i += 1
             config.tick_interval = dur
         }
+    }
+
+    if ip_str := os.get_env("PULSE_IP"); ip_str != "" 
+    {
+        config.ip = net.parse_address( ip_str )
     }
 
     if port_str := os.get_env( "PULSE_PORT" ); port_str != ""
