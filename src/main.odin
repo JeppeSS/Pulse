@@ -13,6 +13,7 @@ main :: proc()
     context.logger = log.create_console_logger ( opt = log_options )
 
     config := c.parse_config_from_args()
+    c.print_config( config )
 
 
     p_connection_manager := s.connection_manager_create( config )

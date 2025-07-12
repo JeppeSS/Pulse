@@ -5,6 +5,7 @@ import "core:os"
 import "core:strings"
 import "core:strconv"
 import "core:net"
+import "core:log"
 
 Pulse_Config :: struct {
     ip: net.Address,
@@ -81,4 +82,13 @@ parse_config_from_args :: proc() -> Pulse_Config
     }
 
     return config
+}
+
+print_config :: proc( config: Pulse_Config ) 
+{
+    log.infof( "Pulse Config:")
+    log.infof( "  IP Address         : %v", config.ip )
+    log.infof( "  Port               : %d", config.port )
+    log.infof( "  Connection Timeout : %v", config.connection_timeout )
+    log.infof( "  Tick Interval      : %v", config.tick_interval )
 }
