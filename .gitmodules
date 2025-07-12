@@ -1,3 +1,4 @@
-[submodule "clients/python"]
-	path = clients/python
+[submodule "tests/integration/clients"]
+	path = tests/integration/clients
 	url = git@github.com:JeppeSS/pulse-client-python.git
+ 
