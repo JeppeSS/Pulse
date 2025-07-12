@@ -28,5 +28,5 @@ jobs:
 
       - name: Run integration tests
         run: |
-          docker-compose build --parallel
-          docker-compose run --rm test
+          docker compose build --parallel
+          docker compose run --rm test
