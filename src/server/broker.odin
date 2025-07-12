@@ -38,7 +38,7 @@ broker_create :: proc( p_manager: ^Connection_Manager ) -> ^Broker
     p_broker.subscriptions = make( map[string][dynamic]string )
 
     // TODO[Jeppe]: Move to config
-    socket, err := net.make_bound_udp_socket( net.IP4_Loopback, 3030 )
+    socket, err := net.make_bound_udp_socket( net.IP4_Any, 3030 )
     if err != nil
     {
         fmt.eprintfln( "Failed to create socket: %v", err )
@@ -114,6 +114,7 @@ broker_poll :: proc( p_broker: ^Broker )
             endpoint = remote_endpoint
         })
 
+        fmt.printfln( "Received UDP from %v, %d bytes", remote_endpoint, bytes_read )
         message, ok := decode_incoming_message( buffer[:], remote_endpoint )
         if ok
         {
@@ -125,12 +126,23 @@ broker_poll :: proc( p_broker: ^Broker )
 @(private)
 broker_handle_message :: proc( p_broker: ^Broker, message: Message )
 {
-    #partial switch _ in message.data
+    switch _ in message.data
     {
-        case Subscribe: handle_subscribe( p_broker, message.from, message.data.(Subscribe) )
-        case Unsubscribe: handle_unsubscribe( p_broker, message.from, message.data.(Unsubscribe) )
-        case Publish: handle_publish( p_broker, message.from, message.data.(Publish) )
-        case Unsubscribe_All: handle_unsubscribe_all( p_broker, message.from, message.data.(Unsubscribe_All) )
+        case Subscribe: 
+            fmt.printfln( "Handling Subscribe from %v", message.from )
+            handle_subscribe( p_broker, message.from, message.data.(Subscribe) )
+        case Unsubscribe: 
+            fmt.printfln( "Handling Unsubscribe from %v", message.from )
+            handle_unsubscribe( p_broker, message.from, message.data.(Unsubscribe) )
+        case Publish:
+            fmt.printfln( "Handling Publish from %v", message.from )
+            handle_publish( p_broker, message.from, message.data.(Publish) )
+        case Unsubscribe_All:
+            fmt.printfln( "Handling Unsubscribe_All from %v", message.from )
+            handle_unsubscribe_all( p_broker, message.from, message.data.(Unsubscribe_All) )
+        case Ping: 
+            fmt.printfln( "Handling Ping from %v", message.from )
+            handle_ping( p_broker, message.from )
     }
 }
 
@@ -173,10 +185,14 @@ decode_incoming_message :: proc( buffer: []u8, from: net.Endpoint ) -> ( message
                 topic = topic,
                 payload = cloned_payload,
             }
+        case .Ping:
+            message_data = Ping{}
         case:
+            fmt.eprintfln( "Unknown message_type: %d from %v", message_type, from )
             return Message{}, false
     }
 
+    fmt.printfln( "Decoded %v message from %v", message_type, from )
     return Message{ from = from, data = message_data }, true
 }
 
@@ -407,18 +423,28 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
 @(private)
 handle_unsubscribe_all :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsubscribe_All )
 {
-     for topic, info in p_broker.topic_map
-     {
-        for sub in info.subscribers 
-        {
-            if sub.address == from.address && sub.port == from.port 
-            {
-                q.enqueue(Message, &p_broker.inbox, Message{
-                    from = from,
-                    data = Unsubscribe{ topic = topic }
-                })
-                break
-            }
-        }
+    key := net.endpoint_to_string( from )
+    topics, exists := p_broker.subscriptions[ key ]
+    if !exists 
+    {
+        return
     }
+
+    for topic in topics 
+    {
+        q.enqueue(Message, &p_broker.inbox, Message{
+            from = from,
+            data = Unsubscribe{ topic = topic }
+        })
+    }
+}
+
+@(private)
+handle_ping :: proc( p_broker: ^Broker, from: net.Endpoint )
+{
+    q.enqueue( Connection_Message, &p_broker.p_manager.actor.inbox, Touch_Message{
+        endpoint = from
+    })
+
+    fmt.printfln("Received ping from %v", from)
 }

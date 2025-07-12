@@ -24,12 +24,18 @@ Publish :: struct
     payload: [dynamic]u8
 }
 
+Ping :: struct
+{
+
+}
+
 
 Message_Type :: enum u8
 {
     Publish     = 1,
     Subscribe   = 2,
-    Unsubscribe = 3
+    Unsubscribe = 3,
+    Ping        = 4
 }
 
 
@@ -39,6 +45,7 @@ Message_Data :: union
     Unsubscribe,
     Unsubscribe_All,
     Publish,
+    Ping
 }
 
 Message :: struct

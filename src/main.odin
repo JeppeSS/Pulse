@@ -24,6 +24,7 @@ main :: proc()
 
     ticker_interval := time.Second * 5
 
+    fmt.printfln("Starting Pulse Server...")
     for
     {
         if time.stopwatch_duration( ticker ) > ticker_interval
