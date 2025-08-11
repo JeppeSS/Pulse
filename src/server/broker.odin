@@ -39,7 +39,6 @@ broker_create :: proc( p_manager: ^Connection_Manager, config: c.Pulse_Config ) 
     p_broker.topic_map = make( map[string]Topic_Info )
     p_broker.subscriptions = make( map[string][dynamic]string )
 
-    // TODO[Jeppe]: Move to config
     socket, err := net.make_bound_udp_socket( config.ip, config.port )
     if err != nil
     {
@@ -118,7 +117,7 @@ broker_poll :: proc( p_broker: ^Broker )
         })
 
         log.infof( "Received UDP from %v, %d bytes", remote_endpoint, bytes_read )
-        message, ok := decode_incoming_message( buffer[:], remote_endpoint )
+        message, ok := decode_incoming_message( buffer[ :bytes_read ], remote_endpoint )
         if ok
         {
             q.enqueue( Message, &p_broker.inbox, message )
@@ -154,24 +153,31 @@ broker_handle_message :: proc( p_broker: ^Broker, message: Message )
 @(private)
 decode_incoming_message :: proc( buffer: []u8, from: net.Endpoint ) -> ( message: Message, success: bool )
 {
-    if len( buffer) <= 0
+    header := 5
+    if len( buffer) < header
     {
+        log.warnf( "Short header from %v", from )
         return Message{}, false
     }
-
-    header_size := size_of( u8 ) + size_of( u16 ) + size_of( u16 ) 
-
+    
     message_type := Message_Type( buffer[0] )
-    topic_len    := (u16(buffer[1]) << 8) | u16(buffer[2])
-    payload_len  := (u16(buffer[3]) << 8) | u16(buffer[4])
+    topic_len    := ( u16( buffer[ 1 ] ) << 8 ) | u16( buffer[ 2 ] )
+    payload_len  := ( u16(buffer[ 3 ]) << 8) | u16( buffer[ 4 ] )
 
-    topic_start := header_size
-    topic_end := topic_start + int( topic_len )
-    topic := strings.clone( string( buffer[ topic_start : topic_end ] ) )
+    if len( buffer ) < header + int( topic_len ) 
+    { 
+        return Message{}, false 
+    }
 
-    payload_start: u16 = u16( topic_end )
-    payload_end := payload_start + payload_len
+    topic_bytes := buffer[ header : header + int( topic_len ) ]
+    topic := strings.clone( string( topic_bytes ) )
 
+    payload_start := header + int( topic_len )
+    if len( buffer ) < payload_start + int( payload_len )
+     { 
+        delete( topic )
+        return Message{}, false 
+    }
 
     
     message_data: Message_Data
@@ -181,16 +187,17 @@ decode_incoming_message :: proc( buffer: []u8, from: net.Endpoint ) -> ( message
         case .Unsubscribe:
             message_data = Unsubscribe{ topic = topic }
         case .Publish:
-            cloned_payload := make([dynamic]u8, payload_len)
-            copy(cloned_payload[:], buffer[payload_start : payload_end])
-
+            cloned_payload := make( [ dynamic ]u8, payload_len )
+            copy( cloned_payload[ : ], buffer[ payload_start : payload_start + int( payload_len ) ] )
             message_data = Publish{
                 topic = topic,
                 payload = cloned_payload,
             }
         case .Ping:
             message_data = Ping{}
+            delete( topic )
         case:
+            delete( topic)
             log.warnf( "Unknown message_type: %d from %v", message_type, from )
             return Message{}, false
     }
@@ -283,7 +290,16 @@ handle_subscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Subscr
    {
         if topic_matches( message.topic, topic_key ) && info.retained != nil && len( info.retained ) > 0 
         {
-            _, err := net.send_udp( p_broker.socket, info.retained[:], from )
+            packet, ok := make_publish_packet( topic_key, info.retained[ : ] )
+            if !ok
+            {
+                if( packet != nil )
+                {
+                    delete( packet )
+                }
+                continue
+            }
+            _, err := net.send_udp( p_broker.socket, packet[ : ], from )
             if err != nil 
             {
                 log.errorf( "Failed to send retained to %v on topic '%s': %v", from, topic_key, err )
@@ -331,7 +347,7 @@ handle_unsubscribe :: proc( p_broker: ^Broker, from: net.Endpoint, message: Unsu
     {
         delete( topic_info.subscribers )
 
-        if topic_info.retained == nil || len(topic_info.retained) == 0 
+        if topic_info.retained == nil || len( topic_info.retained ) == 0 
         {
             if topic_info.retained != nil 
             {
@@ -383,68 +399,77 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
     defer delete( message.payload )
     total_sent := 0
 
-
     topic_info, ok :=  p_broker.topic_map[ message.topic ]
     if !ok
     {
         topic_info = Topic_Info{
-            subscribers = make([dynamic]net.Endpoint, 0, 8),
+            subscribers = make( [ dynamic ]net.Endpoint, 0, 8 ),
         }
     }
 
+    if topic_info.retained != nil
+    {
+        delete( topic_info.retained )
+    }
+
     retained_copy := make( [dynamic]u8, len( message.payload ) )
-    copy( retained_copy[:], message.payload[:] )
+    copy( retained_copy[ : ], message.payload[ : ] )
     topic_info.retained = retained_copy
 
     p_broker.topic_map[ message.topic ] = topic_info
 
-     for sub_topic, sub_info in p_broker.topic_map
-     {
+    recipients := make( map[ string ]net.Endpoint )
+    for sub_topic, sub_info in p_broker.topic_map
+    {
         if !topic_matches(sub_topic, message.topic)
         {
             continue
         }
 
-        topic_bytes := transmute( []u8 )message.topic
-        topic_len := len(topic_bytes)
-        payload_len := len(message.payload)
-
-        if topic_len > 65535 {
-            log.errorf("Topic too long: %d bytes", topic_len)
-            return
-        }
-        if payload_len > 65535 {
-            log.errorf("Payload too long: %d bytes", payload_len)
-            return
-        }
-
-        packet_len := 1 + 2 + 2 + topic_len + payload_len
-        packet := make([dynamic]u8, packet_len)
-
-        packet[0] = u8(Message_Type.Publish)
-        packet[1] = u8(topic_len >> 8)
-        packet[2] = u8(topic_len & 0xFF)
-        packet[3] = u8(payload_len >> 8)
-        packet[4] = u8(payload_len & 0xFF)
-        copy(packet[5:], topic_bytes[:])
-        copy(packet[5 + topic_len:], message.payload[:])
-
-        for sub in sub_info.subscribers 
+        for sub in sub_info.subscribers
         {
-            _, err := net.send_udp( p_broker.socket, packet[:], sub )
-            if err != nil 
-            {
-                log.errorf( "Failed to send to %v: %v", sub, err )
-            } 
-            else 
-            {
-                total_sent += 1
-            }
+            key := net.endpoint_to_string( sub )
+            recipients[ key ] = sub
         }
     }
 
+    if len( recipients ) == 0
+    {
+        log.infof( "Published to 0 subs (retained updated) for topic '%s'", message.topic )
+        return
+    }
 
-    log.infof( "Published to %d subs matching topic '%s'", total_sent, message.topic )
+    packet, is_packet_ok := make_publish_packet( message.topic, message.payload[ : ] )
+    if !is_packet_ok 
+    {
+        if packet != nil 
+        { 
+            delete( packet )
+        }
+        log.errorf( "Failed to build publish packet for topic '%s' (len/topic invalid)", message.topic )
+        return
+    }
+
+    defer if packet != nil 
+    {
+        delete(packet)
+    }
+
+    for _, ep in recipients {
+        if ep.address == from.address && ep.port == from.port 
+        {
+            continue 
+        }
+        _, err := net.send_udp( p_broker.socket, packet[ : ], ep )
+        if err != nil 
+        {
+            log.errorf( "Failed to send to %v: %v", ep, err )
+            continue
+        }
+        total_sent += 1
+    }
+
+    log.infof( "Published to %d unique subs matching topic '%s'", total_sent, message.topic )
 }
 
 @(private)
@@ -474,4 +499,28 @@ handle_ping :: proc( p_broker: ^Broker, from: net.Endpoint )
     })
 
     log.infof( "Received ping from %v", from )
+}
+
+@(private)
+make_publish_packet :: proc( topic: string, payload: []u8 ) -> ( [ dynamic ]u8, bool )
+{
+    topic_bytes := transmute( []u8 )topic
+    tlen := len( topic_bytes )
+    plen := len( payload )
+    if tlen == 0 || tlen > 65535 || plen > 65535 
+    {
+        return nil, false
+    }
+
+    packet_len := 1 + 2 + 2 + tlen + plen
+    packet := make( [ dynamic ]u8, packet_len )
+
+    packet[ 0 ] = u8( Message_Type.Publish )
+    packet[ 1 ] = u8( tlen >> 8 )
+    packet[ 2 ] = u8( tlen & 0xFF )
+    packet[ 3 ] = u8( plen >> 8 )
+    packet[ 4 ] = u8( plen & 0xFF )
+    copy( packet[ 5: ], topic_bytes[ : ] )
+    copy( packet[ 5+tlen: ], payload[ : ] )
+    return packet, true
 }
