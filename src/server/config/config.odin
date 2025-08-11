@@ -22,7 +22,7 @@ parse_config_from_args :: proc() -> Pulse_Config
         ip                 = net.IP4_Any,
         port               = 3030,
         connection_timeout = time.Second * 30,
-        tick_interval      = time.Second * 5,
+        tick_interval      = time.Second * 30,
     }
 
     for i := 0; i < len( os.args ); i += 1

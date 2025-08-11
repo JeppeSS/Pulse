@@ -159,11 +159,11 @@ decode_incoming_message :: proc( buffer: []u8, from: net.Endpoint ) -> ( message
         return Message{}, false
     }
 
-    header_size := size_of( u8 ) + size_of( u8 ) + size_of( u16 )
+    header_size := size_of( u8 ) + size_of( u16 ) + size_of( u16 ) 
 
     message_type := Message_Type( buffer[0] )
-    topic_len    := buffer[1]
-    payload_len  := ( u16(buffer[2]) << 8) | u16(buffer[3] )
+    topic_len    := (u16(buffer[1]) << 8) | u16(buffer[2])
+    payload_len  := (u16(buffer[3]) << 8) | u16(buffer[4])
 
     topic_start := header_size
     topic_end := topic_start + int( topic_len )
@@ -405,9 +405,33 @@ handle_publish :: proc( p_broker: ^Broker, from: net.Endpoint, message: Publish 
             continue
         }
 
+        topic_bytes := transmute( []u8 )message.topic
+        topic_len := len(topic_bytes)
+        payload_len := len(message.payload)
+
+        if topic_len > 65535 {
+            log.errorf("Topic too long: %d bytes", topic_len)
+            return
+        }
+        if payload_len > 65535 {
+            log.errorf("Payload too long: %d bytes", payload_len)
+            return
+        }
+
+        packet_len := 1 + 2 + 2 + topic_len + payload_len
+        packet := make([dynamic]u8, packet_len)
+
+        packet[0] = u8(Message_Type.Publish)
+        packet[1] = u8(topic_len >> 8)
+        packet[2] = u8(topic_len & 0xFF)
+        packet[3] = u8(payload_len >> 8)
+        packet[4] = u8(payload_len & 0xFF)
+        copy(packet[5:], topic_bytes[:])
+        copy(packet[5 + topic_len:], message.payload[:])
+
         for sub in sub_info.subscribers 
         {
-            _, err := net.send_udp( p_broker.socket, message.payload[:], sub )
+            _, err := net.send_udp( p_broker.socket, packet[:], sub )
             if err != nil 
             {
                 log.errorf( "Failed to send to %v: %v", sub, err )
